@@ -424,8 +424,15 @@ pub const Policy = struct {
 
         // Verify digest if specified in the rule
         if (cmd.digest) |digest| {
+            // Convert ast.DigestAlgorithm to common.digest.DigestAlgorithm
+            const algo: common.DigestAlgorithm = switch (digest.algorithm) {
+                .sha224 => .sha224,
+                .sha256 => .sha256,
+                .sha384 => .sha384,
+                .sha512 => .sha512,
+            };
             const digest_valid = verifyFileDigest(command, .{
-                .algorithm = digest.algorithm,
+                .algorithm = algo,
                 .hash = digest.hash,
             }) catch false;
 

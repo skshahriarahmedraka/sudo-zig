@@ -8,6 +8,7 @@ const build_options = @import("build_options");
 // Sub-modules
 pub const mail = @import("mail.zig");
 pub const audit = @import("audit.zig");
+pub const iolog = @import("iolog.zig");
 
 // Re-export main types
 pub const MailConfig = mail.MailConfig;
@@ -17,6 +18,14 @@ pub const AuditConfig = audit.AuditConfig;
 pub const AuditLogger = audit.AuditLogger;
 pub const AuditEvent = audit.AuditEvent;
 pub const AuditRecord = audit.AuditRecord;
+
+// I/O logging types
+pub const IoLogConfig = iolog.IoLogConfig;
+pub const IoLogger = iolog.IoLogger;
+pub const IoLogStream = iolog.IoLogStream;
+pub const SessionInfo = iolog.SessionInfo;
+pub const SessionPlayer = iolog.SessionPlayer;
+pub const TimingEntry = iolog.TimingEntry;
 
 const c = @cImport({
     @cInclude("syslog.h");

@@ -15,6 +15,19 @@ const build_options = @import("build_options");
 
 pub const cli = @import("cli.zig");
 pub const lecture = @import("lecture.zig");
+pub const plugin = @import("plugin.zig");
+
+// Plugin API exports
+pub const PluginRegistry = plugin.PluginRegistry;
+pub const PolicyPlugin = plugin.PolicyPlugin;
+pub const IoLogPlugin = plugin.IoLogPlugin;
+pub const AuditPlugin = plugin.AuditPlugin;
+pub const AuthPlugin = plugin.AuthPlugin;
+pub const PluginType = plugin.PluginType;
+pub const PluginInfo = plugin.PluginInfo;
+pub const CommandContext = plugin.CommandContext;
+pub const PolicyResult = plugin.PolicyResult;
+pub const AuthResult = plugin.AuthResult;
 
 const version = root.version;
 

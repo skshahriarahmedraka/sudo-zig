@@ -16,6 +16,7 @@ pub const timestamp = @import("timestamp.zig");
 pub const apparmor = @import("apparmor.zig");
 pub const rate_limit = @import("rate_limit.zig");
 pub const selinux = @import("selinux.zig");
+pub const seccomp = @import("seccomp.zig");
 
 // Re-export main types
 pub const User = user.User;
@@ -56,6 +57,13 @@ pub const isSELinuxEnabled = selinux.isEnabled;
 pub const getSELinuxMode = selinux.getMode;
 pub const setupSudoSELinuxContext = selinux.setupSudoContext;
 pub const cleanupSudoSELinuxContext = selinux.cleanupSudoContext;
+
+// Seccomp types
+pub const SeccompFilter = seccomp.SeccompFilter;
+pub const SeccompProfile = seccomp.Profile;
+pub const SeccompAction = seccomp.Action;
+pub const SeccompSyscall = seccomp.Syscall;
+pub const isSeccompAvailable = seccomp.isAvailable;
 
 /// Hostname buffer type with reasonable size.
 pub const Hostname = struct {

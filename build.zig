@@ -340,6 +340,50 @@ pub fn build(b: *std.Build) void {
     const visudo_tests = b.addTest(.{ .root_module = visudo_test_module });
     const run_visudo_tests = b.addRunArtifact(visudo_tests);
 
+    // SELinux tests
+    const selinux_test_module = b.createModule(.{
+        .root_source_file = b.path("tests/unit/system/selinux_test.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    selinux_test_module.addImport("sudo-zig-lib", lib_module);
+    selinux_test_module.link_libc = true;
+    const selinux_tests = b.addTest(.{ .root_module = selinux_test_module });
+    const run_selinux_tests = b.addRunArtifact(selinux_tests);
+
+    // Rate limit tests
+    const rate_limit_test_module = b.createModule(.{
+        .root_source_file = b.path("tests/unit/system/rate_limit_test.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    rate_limit_test_module.addImport("sudo-zig-lib", lib_module);
+    rate_limit_test_module.link_libc = true;
+    const rate_limit_tests = b.addTest(.{ .root_module = rate_limit_test_module });
+    const run_rate_limit_tests = b.addRunArtifact(rate_limit_tests);
+
+    // Process tests
+    const process_test_module = b.createModule(.{
+        .root_source_file = b.path("tests/unit/system/process_test.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    process_test_module.addImport("sudo-zig-lib", lib_module);
+    process_test_module.link_libc = true;
+    const process_tests = b.addTest(.{ .root_module = process_test_module });
+    const run_process_tests = b.addRunArtifact(process_tests);
+
+    // LDAP tests
+    const ldap_test_module = b.createModule(.{
+        .root_source_file = b.path("tests/unit/sudoers/ldap_test.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    ldap_test_module.addImport("sudo-zig-lib", lib_module);
+    ldap_test_module.link_libc = true;
+    const ldap_tests = b.addTest(.{ .root_module = ldap_test_module });
+    const run_ldap_tests = b.addRunArtifact(ldap_tests);
+
     // Test step for unit tests
     const test_step = b.step("test", "Run unit tests");
     test_step.dependOn(&run_lib_unit_tests.step);
@@ -363,6 +407,34 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_i18n_tests.step);
     test_step.dependOn(&run_su_tests.step);
     test_step.dependOn(&run_visudo_tests.step);
+    test_step.dependOn(&run_selinux_tests.step);
+    test_step.dependOn(&run_rate_limit_tests.step);
+    test_step.dependOn(&run_process_tests.step);
+    test_step.dependOn(&run_ldap_tests.step);
+
+    // ============================================
+    // Benchmark executable
+    // ============================================
+    const benchmark_module = b.createModule(.{
+        .root_source_file = b.path("tests/benchmarks/main.zig"),
+        .target = target,
+        .optimize = .ReleaseFast, // Always optimize benchmarks
+    });
+    benchmark_module.addImport("sudo-zig-lib", lib_module);
+    benchmark_module.link_libc = true;
+
+    const benchmark_exe = b.addExecutable(.{
+        .name = "benchmark",
+        .root_module = benchmark_module,
+    });
+
+    b.installArtifact(benchmark_exe);
+
+    const run_benchmark = b.addRunArtifact(benchmark_exe);
+    run_benchmark.step.dependOn(b.getInstallStep());
+
+    const benchmark_step = b.step("benchmark", "Run performance benchmarks");
+    benchmark_step.dependOn(&run_benchmark.step);
 
     // ============================================
     // Run targets for development
