@@ -385,10 +385,9 @@ fn executeInChild(options: RunOptions, environment: std.StringHashMap([]const u8
         env_ptrs[env_count] = @ptrCast(&env_bufs[env_count]);
         env_count += 1;
     }
-    env_ptrs[env_count] = undefined; // Null terminator will be set by sentinel
 
     // 6. Build argv array
-    var argv_ptrs: [64][*:0]const u8 = undefined;
+    var argv_ptrs: [64]?[*:0]const u8 = undefined;
     var argv_bufs: [64][512]u8 = undefined;
 
     // First arg is the command itself
@@ -406,16 +405,26 @@ fn executeInChild(options: RunOptions, environment: std.StringHashMap([]const u8
         argv_ptrs[argc] = @ptrCast(&argv_bufs[argc]);
         argc += 1;
     }
+    // Null-terminate the argv array (required by execve)
+    argv_ptrs[argc] = null;
 
-    // 7. Create null-terminated command path
+    // 7. Build null-terminated env array
+    var env_final: [256]?[*:0]const u8 = undefined;
+    for (0..env_count) |i| {
+        env_final[i] = env_ptrs[i];
+    }
+    // Null-terminate the env array (required by execve)
+    env_final[env_count] = null;
+
+    // 8. Create null-terminated command path
     var cmd_buf: [512:0]u8 = undefined;
     const path_len = @min(options.command.len, cmd_buf.len - 1);
     @memcpy(cmd_buf[0..path_len], options.command[0..path_len]);
     cmd_buf[path_len] = 0;
 
-    // 8. Execute!
-    const argv_slice: [*:null]const ?[*:0]const u8 = @ptrCast(argv_ptrs[0..argc].ptr);
-    const env_slice: [*:null]const ?[*:0]const u8 = @ptrCast(env_ptrs[0..env_count].ptr);
+    // 9. Execute!
+    const argv_slice: [*:null]const ?[*:0]const u8 = @ptrCast(&argv_ptrs);
+    const env_slice: [*:null]const ?[*:0]const u8 = @ptrCast(&env_final);
 
     const err = posix.execveZ(&cmd_buf, argv_slice, env_slice);
     return err;

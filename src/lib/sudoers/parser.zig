@@ -802,8 +802,17 @@ pub fn parseFile(allocator: Allocator, path: []const u8) !ast.Sudoers {
     const file = try std.fs.cwd().openFile(path, .{});
     defer file.close();
     const source = try file.readToEndAlloc(allocator, 1024 * 1024);
-    defer allocator.free(source);
-    return parse(allocator, source);
+    errdefer allocator.free(source);
+
+    var sudoers = try parse(allocator, source);
+    errdefer sudoers.deinit();
+
+    // Transfer ownership of the source buffer to the Sudoers struct.
+    // This keeps the source alive for the lifetime of the AST, since all
+    // string slices (usernames, hostnames, paths, etc.) point into it.
+    try sudoers.addSourceBuffer(source);
+
+    return sudoers;
 }
 
 /// Error types for include processing
@@ -872,15 +881,27 @@ fn processIncludeFile(
     
     // Parse the included file
     var included = parseFile(allocator, path) catch return;
-    defer included.deinit();
+    // Note: We don't defer included.deinit() because mergeSudoers transfers ownership
+    // of all data including source buffers to the destination sudoers.
+    errdefer included.deinit();
     
     // Add new includes to pending
     for (included.includes.items) |inc| {
         try pending.append(allocator, inc);
     }
     
-    // Merge into main sudoers
+    // Merge into main sudoers (transfers ownership of all data)
     try mergeSudoers(allocator, sudoers, &included);
+    
+    // Clean up the empty shell of the included struct (source_buffers ownership transferred)
+    included.defaults.deinit(allocator);
+    included.user_specs.deinit(allocator);
+    included.includes.deinit(allocator);
+    included.source_buffers.deinit(allocator);
+    included.aliases.user.deinit();
+    included.aliases.host.deinit();
+    included.aliases.cmnd.deinit();
+    included.aliases.runas.deinit();
 }
 
 fn processIncludeDir(
@@ -967,9 +988,16 @@ fn mergeSudoers(allocator: Allocator, dest: *ast.Sudoers, src: *ast.Sudoers) !vo
         try dest.user_specs.append(allocator, spec);
     }
     
+    // Transfer ownership of source buffers (critical for string lifetime!)
+    // The source buffers back all the string slices in the merged AST data.
+    for (src.source_buffers.items) |source| {
+        try dest.source_buffers.append(allocator, source);
+    }
+    
     // Clear src lists without freeing items (they're now owned by dest)
     src.defaults.items.len = 0;
     src.user_specs.items.len = 0;
+    src.source_buffers.items.len = 0;
 }
 
 test "parse simple user spec" {

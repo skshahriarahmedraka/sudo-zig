@@ -8,6 +8,30 @@ const testing = std.testing;
 const lib = @import("sudo-zig-lib");
 
 // ============================================
+// Helper to create mock User for testing
+// ============================================
+
+fn createMockUser(name: []const u8, uid: lib.system.UserId, gid: lib.system.GroupId, home: []const u8, shell: []const u8) lib.system.User {
+    var user = lib.system.User{
+        .uid = uid,
+        .gid = gid,
+    };
+    // Copy name
+    const name_len = @min(name.len, user._name_buf.len - 1);
+    @memcpy(user._name_buf[0..name_len], name[0..name_len]);
+    user._name_len = name_len;
+    // Copy home
+    const home_len = @min(home.len, user._home_buf.len - 1);
+    @memcpy(user._home_buf[0..home_len], home[0..home_len]);
+    user._home_len = home_len;
+    // Copy shell
+    const shell_len = @min(shell.len, user._shell_buf.len - 1);
+    @memcpy(user._shell_buf[0..shell_len], shell[0..shell_len]);
+    user._shell_len = shell_len;
+    return user;
+}
+
+// ============================================
 // Policy Evaluation Parity
 // ============================================
 
@@ -21,8 +45,10 @@ test "parity: root can run any command" {
 
     var policy = lib.sudoers.Policy.init(allocator, &parsed);
 
+    const mock_user = createMockUser("root", 0, 0, "/root", "/bin/bash");
+
     const result = policy.check(.{
-        .user = .{ .name = "root", .uid = 0, .gid = 0, .home = "/root", .shell = "/bin/bash", .gecos = "" },
+        .user = &mock_user,
         .groups = &[_]lib.system.GroupId{0},
         .hostname = "localhost",
         .command = "/usr/bin/ls",
@@ -44,8 +70,10 @@ test "parity: NOPASSWD respects tag" {
 
     var policy = lib.sudoers.Policy.init(allocator, &parsed);
 
+    const mock_user = createMockUser("alice", 1000, 1000, "/home/alice", "/bin/bash");
+
     const result = policy.check(.{
-        .user = .{ .name = "alice", .uid = 1000, .gid = 1000, .home = "/home/alice", .shell = "/bin/bash", .gecos = "" },
+        .user = &mock_user,
         .groups = &[_]lib.system.GroupId{1000},
         .hostname = "localhost",
         .command = "/usr/bin/ls",
@@ -68,8 +96,10 @@ test "parity: unauthorized user denied" {
 
     var policy = lib.sudoers.Policy.init(allocator, &parsed);
 
+    const mock_user = createMockUser("bob", 1001, 1001, "/home/bob", "/bin/bash");
+
     const result = policy.check(.{
-        .user = .{ .name = "bob", .uid = 1001, .gid = 1001, .home = "/home/bob", .shell = "/bin/bash", .gecos = "" },
+        .user = &mock_user,
         .groups = &[_]lib.system.GroupId{1001},
         .hostname = "localhost",
         .command = "/usr/bin/ls",

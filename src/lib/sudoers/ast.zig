@@ -23,6 +23,9 @@ pub const Sudoers = struct {
     aliases: Aliases,
     user_specs: std.ArrayListUnmanaged(UserSpec),
     includes: std.ArrayListUnmanaged(IncludeDirective),
+    /// Source buffers that back all string slices in the AST.
+    /// These must be kept alive for the lifetime of the Sudoers struct.
+    source_buffers: std.ArrayListUnmanaged([]const u8),
 
     const Self = @This();
 
@@ -33,7 +36,14 @@ pub const Sudoers = struct {
             .aliases = Aliases.init(allocator),
             .user_specs = .{},
             .includes = .{},
+            .source_buffers = .{},
         };
+    }
+
+    /// Add a source buffer to be owned by this Sudoers struct.
+    /// The buffer will be freed when Sudoers.deinit() is called.
+    pub fn addSourceBuffer(self: *Self, source: []const u8) !void {
+        try self.source_buffers.append(self.allocator, source);
     }
 
     pub fn deinit(self: *Self) void {
@@ -50,6 +60,12 @@ pub const Sudoers = struct {
         self.user_specs.deinit(self.allocator);
         
         self.includes.deinit(self.allocator);
+
+        // Free all source buffers that back string slices in the AST
+        for (self.source_buffers.items) |source| {
+            self.allocator.free(source);
+        }
+        self.source_buffers.deinit(self.allocator);
     }
 
     /// Add a default setting

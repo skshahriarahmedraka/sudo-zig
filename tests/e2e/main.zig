@@ -34,7 +34,7 @@ test "e2e: lookup root user" {
 
     if (root_user) |user| {
         try std.testing.expectEqual(@as(lib.system.UserId, 0), user.uid);
-        try std.testing.expectEqualStrings("root", user.name);
+        try std.testing.expectEqualStrings("root", user.getName());
     }
 }
 
