@@ -76,8 +76,10 @@ pub fn parseArgs() !Action {
     var remove_timestamp = false;
     var list_opts = ListOptions{};
 
-    // Use a fixed-size buffer for positional args
-    var positional_buf: [64][]const u8 = undefined;
+    // Use a static buffer for positional args (must outlive function return)
+    const static = struct {
+        var positional_buf: [64][]const u8 = undefined;
+    };
     var positional_count: usize = 0;
 
     while (args.next()) |arg| {
@@ -128,8 +130,8 @@ pub fn parseArgs() !Action {
             } else if (std.mem.eql(u8, arg, "--")) {
                 // Rest are positional
                 while (args.next()) |pos| {
-                    if (positional_count >= positional_buf.len) return error.TooManyArguments;
-                    positional_buf[positional_count] = pos;
+                    if (positional_count >= static.positional_buf.len) return error.TooManyArguments;
+                    static.positional_buf[positional_count] = pos;
                     positional_count += 1;
                 }
                 break;
@@ -137,13 +139,13 @@ pub fn parseArgs() !Action {
                 return error.UnknownOption;
             }
         } else {
-            if (positional_count >= positional_buf.len) return error.TooManyArguments;
-            positional_buf[positional_count] = arg;
+            if (positional_count >= static.positional_buf.len) return error.TooManyArguments;
+            static.positional_buf[positional_count] = arg;
             positional_count += 1;
             // Rest are command arguments
             while (args.next()) |pos| {
-                if (positional_count >= positional_buf.len) return error.TooManyArguments;
-                positional_buf[positional_count] = pos;
+                if (positional_count >= static.positional_buf.len) return error.TooManyArguments;
+                static.positional_buf[positional_count] = pos;
                 positional_count += 1;
             }
             break;
@@ -160,7 +162,7 @@ pub fn parseArgs() !Action {
     }
 
     if (list_mode) {
-        list_opts.command = positional_buf[0..positional_count];
+        list_opts.command = static.positional_buf[0..positional_count];
         return .{ .list = list_opts };
     }
 
@@ -168,7 +170,7 @@ pub fn parseArgs() !Action {
         return .{ .edit = .{
             .target_user = options.target_user,
             .target_group = options.target_group,
-            .files = positional_buf[0..positional_count],
+            .files = static.positional_buf[0..positional_count],
             .stdin = options.stdin,
             .non_interactive = options.non_interactive,
             .bell = options.bell,
@@ -176,7 +178,7 @@ pub fn parseArgs() !Action {
         } };
     }
 
-    options.command = positional_buf[0..positional_count];
+    options.command = static.positional_buf[0..positional_count];
     return .{ .run = options };
 }
 

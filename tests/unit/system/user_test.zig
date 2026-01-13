@@ -30,7 +30,7 @@ test "User.fromUid for root (uid 0)" {
     // Root user should always exist
     if (User.fromUid(0)) |root_user| {
         try testing.expectEqual(@as(UserId, 0), root_user.uid);
-        try testing.expectEqualStrings("root", root_user.name);
+        try testing.expectEqualStrings("root", root_user.getName());
         try testing.expect(root_user.isRoot());
     }
 }
@@ -45,9 +45,9 @@ test "User.fromUid for nonexistent uid" {
 test "User.fromName for root" {
     if (User.fromName("root")) |root_user| {
         try testing.expectEqual(@as(UserId, 0), root_user.uid);
-        try testing.expectEqualStrings("root", root_user.name);
-        try testing.expect(root_user.home.len > 0);
-        try testing.expect(root_user.shell.len > 0);
+        try testing.expectEqualStrings("root", root_user.getName());
+        try testing.expect(root_user.getHome().len > 0);
+        try testing.expect(root_user.getShell().len > 0);
     }
 }
 
@@ -77,16 +77,16 @@ test "User.isRoot" {
 
 test "User has home directory" {
     if (User.fromName("root")) |root_user| {
-        try testing.expect(root_user.home.len > 0);
+        try testing.expect(root_user.getHome().len > 0);
         // Root's home is typically /root or /var/root
-        try testing.expect(root_user.home[0] == '/');
+        try testing.expect(root_user.getHome()[0] == '/');
     }
 }
 
 test "User has shell" {
     if (User.fromName("root")) |root_user| {
-        try testing.expect(root_user.shell.len > 0);
-        try testing.expect(root_user.shell[0] == '/');
+        try testing.expect(root_user.getShell().len > 0);
+        try testing.expect(root_user.getShell()[0] == '/');
     }
 }
 
@@ -108,7 +108,7 @@ test "Group.fromGid for root group (gid 0)" {
     if (Group.fromGid(0)) |root_group| {
         try testing.expectEqual(@as(GroupId, 0), root_group.gid);
         // Name might be "root" or "wheel" depending on system
-        try testing.expect(root_group.name.len > 0);
+        try testing.expect(root_group.getName().len > 0);
     }
 }
 

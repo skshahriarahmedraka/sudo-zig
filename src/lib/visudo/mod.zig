@@ -120,7 +120,7 @@ fn edit(options: EditOptions) !void {
         try launchEditor(allocator, editor, temp_path);
 
         // Validate syntax
-        var parsed = sudoers.parse(allocator, temp_path) catch |err| {
+        var parsed = sudoers.parseFile(allocator, temp_path) catch |err| {
             if (!options.quiet) {
                 log.userError("{s}: parse error: {}", .{ temp_path, err });
             }
@@ -190,7 +190,7 @@ fn check(options: CheckOptions) !void {
     }
 
     // Parse the file
-    var parsed = sudoers.parse(allocator, file_path) catch |err| {
+    var parsed = sudoers.parseFile(allocator, file_path) catch |err| {
         if (!options.quiet) {
             log.userError("{s}: parse error: {}", .{ file_path, err });
         }

@@ -74,17 +74,26 @@ test "Authorization.Flags with all enabled" {
 // AuthRequest Tests
 // ============================================
 
+fn createTestUser(name: []const u8, uid: u32, gid: u32, home: []const u8, shell: []const u8) lib.system.User {
+    var user = lib.system.User{
+        .uid = uid,
+        .gid = gid,
+        ._name_len = name.len,
+        ._home_len = home.len,
+        ._shell_len = shell.len,
+        ._gecos_len = 0,
+    };
+    @memcpy(user._name_buf[0..name.len], name);
+    @memcpy(user._home_buf[0..home.len], home);
+    @memcpy(user._shell_buf[0..shell.len], shell);
+    return user;
+}
+
 test "AuthRequest struct creation" {
-    var user: lib.system.User = undefined;
-    user.uid = 1000;
-    user.gid = 1000;
-    user.name = "alice";
-    user.gecos = "Alice User";
-    user.home = "/home/alice";
-    user.shell = "/bin/bash";
+    var user = createTestUser("alice", 1000, 1000, "/home/alice", "/bin/bash");
 
     const request = AuthRequest{
-        .user = user,
+        .user = &user,
         .groups = &[_]u32{ 1000, 27 },
         .hostname = "localhost",
         .command = "/usr/bin/apt",
@@ -93,7 +102,7 @@ test "AuthRequest struct creation" {
         .target_group = null,
     };
 
-    try testing.expectEqualStrings("alice", request.user.name);
+    try testing.expectEqualStrings("alice", request.user.getName());
     try testing.expectEqualStrings("localhost", request.hostname);
     try testing.expectEqualStrings("/usr/bin/apt", request.command);
     try testing.expectEqualStrings("update", request.arguments.?);
@@ -101,16 +110,10 @@ test "AuthRequest struct creation" {
 }
 
 test "AuthRequest without target user defaults to root" {
-    var user: lib.system.User = undefined;
-    user.uid = 1000;
-    user.gid = 1000;
-    user.name = "bob";
-    user.gecos = "";
-    user.home = "/home/bob";
-    user.shell = "/bin/bash";
+    var user = createTestUser("bob", 1000, 1000, "/home/bob", "/bin/bash");
 
     const request = AuthRequest{
-        .user = user,
+        .user = &user,
         .groups = &[_]u32{1000},
         .hostname = "server",
         .command = "/bin/ls",

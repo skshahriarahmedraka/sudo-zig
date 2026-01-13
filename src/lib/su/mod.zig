@@ -62,16 +62,18 @@ fn run(options: RunOptions) !void {
 
     // 1. Get current (requesting) user info
     const real_uid = system.User.realUid();
-    const current_user = system.User.fromUid(real_uid) orelse {
+    var current_user: system.User = undefined;
+    if (!system.User.fromUidInto(real_uid, &current_user)) {
         log.userError("cannot determine current user", .{});
         return error.UserNotFound;
-    };
+    }
 
     // 2. Resolve target user
-    const target_user = system.User.fromName(options.user) orelse {
+    var target_user: system.User = undefined;
+    if (!system.User.fromNameInto(options.user, &target_user)) {
         log.userError("unknown user: {s}", .{options.user});
         return error.UserNotFound;
-    };
+    }
 
     // 3. Resolve target group
     const target_gid = if (options.group) |g|
@@ -84,25 +86,29 @@ fn run(options: RunOptions) !void {
 
     // 4. Authenticate as target user (unless we're root)
     if (real_uid != 0) {
-        try authenticate(current_user.name, target_user.name);
+        try authenticate(current_user.getName(), target_user.getName());
     }
 
     // 5. Determine shell to use
     const shell = options.shell orelse
-        (if (target_user.shell.len > 0) target_user.shell else "/bin/sh");
+        (if (target_user.getShell().len > 0) target_user.getShell() else "/bin/sh");
 
     // 6. Build command arguments
     var args_buf: [64][]const u8 = undefined;
     var args_count: usize = 0;
 
+    // Static buffer for login shell name (must outlive function scope for exec)
+    const static = struct {
+        var login_shell_buf: [256]u8 = undefined;
+    };
+
     // First arg is shell name (or -shell for login)
     if (options.login) {
         // For login shell, argv[0] should start with '-'
-        var login_shell_buf: [256]u8 = undefined;
         const shell_basename = std.fs.path.basename(shell);
-        login_shell_buf[0] = '-';
-        @memcpy(login_shell_buf[1 .. shell_basename.len + 1], shell_basename);
-        args_buf[0] = login_shell_buf[0 .. shell_basename.len + 1];
+        static.login_shell_buf[0] = '-';
+        @memcpy(static.login_shell_buf[1 .. shell_basename.len + 1], shell_basename);
+        args_buf[0] = static.login_shell_buf[0 .. shell_basename.len + 1];
     } else {
         args_buf[0] = shell;
     }
@@ -127,7 +133,7 @@ fn run(options: RunOptions) !void {
         .arguments = args_buf[0..args_count],
         .uid = target_user.uid,
         .gid = target_gid,
-        .cwd = if (options.login) target_user.home else null,
+        .cwd = if (options.login) target_user.getHome() else null,
         .use_pty = options.pty,
         .noexec = false,
     };
@@ -196,10 +202,10 @@ fn buildEnvironment(
 
     if (options.login) {
         // Login shell: minimal environment
-        try env.put("HOME", target_user.home);
-        try env.put("SHELL", if (target_user.shell.len > 0) target_user.shell else "/bin/sh");
-        try env.put("USER", target_user.name);
-        try env.put("LOGNAME", target_user.name);
+        try env.put("HOME", target_user.getHome());
+        try env.put("SHELL", if (target_user.getShell().len > 0) target_user.getShell() else "/bin/sh");
+        try env.put("USER", target_user.getName());
+        try env.put("LOGNAME", target_user.getName());
         try env.put("PATH", "/usr/local/bin:/usr/bin:/bin:/usr/local/sbin:/usr/sbin:/sbin");
 
         // Preserve TERM
@@ -213,8 +219,8 @@ fn buildEnvironment(
             try env.put(entry.key_ptr.*, entry.value_ptr.*);
         }
         // But update USER and HOME
-        try env.put("USER", target_user.name);
-        try env.put("HOME", target_user.home);
+        try env.put("USER", target_user.getName());
+        try env.put("HOME", target_user.getHome());
     } else {
         // Default: preserve most, update user-specific
         var it = env_map.iterator();
@@ -233,11 +239,11 @@ fn buildEnvironment(
         }
 
         // Update user-specific variables
-        try env.put("HOME", target_user.home);
-        try env.put("USER", target_user.name);
-        try env.put("LOGNAME", target_user.name);
-        if (target_user.shell.len > 0) {
-            try env.put("SHELL", target_user.shell);
+        try env.put("HOME", target_user.getHome());
+        try env.put("USER", target_user.getName());
+        try env.put("LOGNAME", target_user.getName());
+        if (target_user.getShell().len > 0) {
+            try env.put("SHELL", target_user.getShell());
         }
     }
 

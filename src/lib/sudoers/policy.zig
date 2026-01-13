@@ -56,8 +56,8 @@ pub const Authorization = struct {
 
 /// Request for authorization check
 pub const AuthRequest = struct {
-    /// User requesting sudo
-    user: User,
+    /// User requesting sudo (pointer to avoid copying internal buffers)
+    user: *const User,
     /// User's groups
     groups: []const GroupId,
     /// Hostname
@@ -148,7 +148,7 @@ pub const Policy = struct {
     }
 
     /// Check if a user matches a user list
-    fn matchesUserList(self: *Self, list: *const ast.UserList, user: User, groups: []const GroupId) bool {
+    fn matchesUserList(self: *Self, list: *const ast.UserList, user: *const User, groups: []const GroupId) bool {
         var matched = false;
         var negated = false;
 
@@ -165,10 +165,10 @@ pub const Policy = struct {
     }
 
     /// Check if a user matches a single user item
-    fn matchesUserItem(self: *Self, item: *const ast.UserItem, user: User, groups: []const GroupId) bool {
+    fn matchesUserItem(self: *Self, item: *const ast.UserItem, user: *const User, groups: []const GroupId) bool {
         return switch (item.value) {
             .all => true,
-            .username => |name| std.mem.eql(u8, name, user.name),
+            .username => |name| std.mem.eql(u8, name, user.getName()),
             .uid => |uid| uid == user.uid,
             .groupname => |name| self.userInGroup(user, groups, name),
             .gid => |gid| self.userInGid(groups, gid),
@@ -178,10 +178,11 @@ pub const Policy = struct {
     }
 
     /// Check if user is in a named group
-    fn userInGroup(self: *Self, user: User, user_groups: []const GroupId, groupname: []const u8) bool {
+    fn userInGroup(self: *Self, user: *const User, user_groups: []const GroupId, groupname: []const u8) bool {
         _ = self;
         // Look up group by name
-        if (Group.fromName(groupname)) |group| {
+        var group: Group = undefined;
+        if (Group.fromNameInto(groupname, &group)) {
             // Check primary group
             if (user.gid == group.gid) return true;
 
@@ -203,7 +204,7 @@ pub const Policy = struct {
     }
 
     /// Check if user matches a User_Alias
-    fn matchesUserAlias(self: *Self, alias_name: []const u8, user: User, groups: []const GroupId) bool {
+    fn matchesUserAlias(self: *Self, alias_name: []const u8, user: *const User, groups: []const GroupId) bool {
         if (self.sudoers.aliases.user.get(alias_name)) |alias_list| {
             return self.matchesUserList(&alias_list, user, groups);
         }
@@ -328,7 +329,8 @@ pub const Policy = struct {
                         .all => true,
                         .username => |name| std.mem.eql(u8, name, target_user),
                         .uid => |uid| blk: {
-                            if (User.fromName(target_user)) |user| {
+                            var user: User = undefined;
+                            if (User.fromNameInto(target_user, &user)) {
                                 break :blk uid == user.uid;
                             }
                             break :blk false;
@@ -369,7 +371,8 @@ pub const Policy = struct {
                         .all => true,
                         .groupname => |name| std.mem.eql(u8, name, target_group),
                         .gid => |gid| blk: {
-                            if (Group.fromName(target_group)) |group| {
+                            var group: Group = undefined;
+                            if (Group.fromNameInto(target_group, &group)) {
                                 break :blk gid == group.gid;
                             }
                             break :blk false;
@@ -470,7 +473,8 @@ pub const Policy = struct {
     fn resolveTargetUser(self: *Self, target_user: ?[]const u8) ?UserId {
         _ = self;
         const username = target_user orelse "root";
-        if (User.fromName(username)) |user| {
+        var user: User = undefined;
+        if (User.fromNameInto(username, &user)) {
             return user.uid;
         }
         // Could be a UID directly
@@ -484,7 +488,8 @@ pub const Policy = struct {
     fn resolveTargetGroup(self: *Self, target_group: ?[]const u8) ?GroupId {
         _ = self;
         const groupname = target_group orelse return null;
-        if (Group.fromName(groupname)) |group| {
+        var group: Group = undefined;
+        if (Group.fromNameInto(groupname, &group)) {
             return group.gid;
         }
         // Could be a GID directly

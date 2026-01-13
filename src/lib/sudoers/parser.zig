@@ -315,9 +315,11 @@ pub const Parser = struct {
     fn parseRunAs(self: *Self) !ast.RunAs {
         _ = self.advance();
         var runas = ast.RunAs.init();
+        errdefer runas.deinit(self.allocator);
 
         if (!self.check(.colon) and !self.check(.close_paren)) {
             var users = ast.UserList.init(self.allocator);
+            errdefer users.deinit(self.allocator);
             while (true) {
                 const item = try self.parseUserItem();
                 try users.append(self.allocator, item);
@@ -330,6 +332,7 @@ pub const Parser = struct {
         if (self.match(.colon)) {
             if (!self.check(.close_paren)) {
                 var groups = ast.GroupList.init(self.allocator);
+                errdefer groups.deinit(self.allocator);
                 while (true) {
                     const item = try self.parseGroupItem();
                     try groups.append(self.allocator, item);

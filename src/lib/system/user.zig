@@ -2,6 +2,10 @@
 //!
 //! Provides interfaces for looking up users and groups from the system
 //! password and group databases.
+//!
+//! IMPORTANT: The User struct stores string data in fixed internal buffers.
+//! The public slice fields (name, home, shell, gecos) are computed on-demand
+//! via getter methods to avoid dangling pointer issues when the struct is copied.
 
 const std = @import("std");
 const posix = std.posix;
@@ -23,28 +27,53 @@ pub const GroupId = u32;
 /// Root user ID
 pub const ROOT_UID: UserId = 0;
 
-/// Root group ID  
+/// Root group ID
 pub const ROOT_GID: GroupId = 0;
 
 /// Maximum number of supplementary groups
 pub const MAX_GROUPS: usize = 64;
 
 /// User information from passwd database.
+/// 
+/// This struct stores all string data in fixed-size internal buffers.
+/// Use the getter methods (getName(), getHome(), etc.) to safely access
+/// string data - these always return valid slices into this struct's own buffers.
 pub const User = struct {
     uid: UserId,
     gid: GroupId,
-    name: []const u8,
-    home: []const u8,
-    shell: []const u8,
-    gecos: []const u8,
-    
-    // Storage for string data (when looked up from system)
+
+    // Storage for string data with lengths
     _name_buf: [256]u8 = undefined,
     _home_buf: [256]u8 = undefined,
     _shell_buf: [256]u8 = undefined,
     _gecos_buf: [256]u8 = undefined,
+    _name_len: usize = 0,
+    _home_len: usize = 0,
+    _shell_len: usize = 0,
+    _gecos_len: usize = 0,
 
     const Self = @This();
+
+    /// Get the user's name. Always returns a valid slice into this struct's buffer.
+    pub fn getName(self: *const Self) []const u8 {
+        return self._name_buf[0..self._name_len];
+    }
+
+    /// Get the user's home directory. Always returns a valid slice into this struct's buffer.
+    pub fn getHome(self: *const Self) []const u8 {
+        return self._home_buf[0..self._home_len];
+    }
+
+    /// Get the user's shell. Always returns a valid slice into this struct's buffer.
+    pub fn getShell(self: *const Self) []const u8 {
+        return self._shell_buf[0..self._shell_len];
+    }
+
+    /// Get the user's GECOS field. Always returns a valid slice into this struct's buffer.
+    pub fn getGecos(self: *const Self) []const u8 {
+        return self._gecos_buf[0..self._gecos_len];
+    }
+
 
     /// Get the effective user ID of the current process.
     pub fn effectiveUid() UserId {
@@ -57,28 +86,54 @@ pub const User = struct {
     }
 
     /// Check if this user is root.
-    pub fn isRoot(self: Self) bool {
+    pub fn isRoot(self: *const Self) bool {
         return self.uid == ROOT_UID;
     }
 
     /// Look up a user by UID from the passwd database.
+    /// Returns null if user not found.
     pub fn fromUid(uid: UserId) ?Self {
         const pwd = c.getpwuid(uid);
         if (pwd == null) return null;
         return fromPasswd(pwd);
     }
 
+    /// Look up a user by UID and write it into `out`.
+    /// Returns true on success, false if user not found.
+    pub fn fromUidInto(uid: UserId, out: *Self) bool {
+        const pwd = c.getpwuid(uid);
+        if (pwd == null) return false;
+        out.* = fromPasswd(pwd);
+        return true;
+    }
+
     /// Look up a user by name from the passwd database.
-    pub fn fromName(name: []const u8) ?Self {
+    /// Returns null if user not found.
+    pub fn fromName(lookup_name: []const u8) ?Self {
         // Create null-terminated string
         var name_buf: [256:0]u8 = undefined;
-        if (name.len >= name_buf.len) return null;
-        @memcpy(name_buf[0..name.len], name);
-        name_buf[name.len] = 0;
+        if (lookup_name.len >= name_buf.len) return null;
+        @memcpy(name_buf[0..lookup_name.len], lookup_name);
+        name_buf[lookup_name.len] = 0;
 
         const pwd = c.getpwnam(&name_buf);
         if (pwd == null) return null;
         return fromPasswd(pwd);
+    }
+
+    /// Look up a user by name and write it into `out`.
+    /// Returns true on success, false if user not found.
+    pub fn fromNameInto(lookup_name: []const u8, out: *Self) bool {
+        // Create null-terminated string
+        var name_buf: [256:0]u8 = undefined;
+        if (lookup_name.len >= name_buf.len) return false;
+        @memcpy(name_buf[0..lookup_name.len], lookup_name);
+        name_buf[lookup_name.len] = 0;
+
+        const pwd = c.getpwnam(&name_buf);
+        if (pwd == null) return false;
+        out.* = fromPasswd(pwd);
+        return true;
     }
 
     /// Create a User from a C passwd struct, copying strings into internal buffers.
@@ -86,60 +141,61 @@ pub const User = struct {
         var user = Self{
             .uid = @intCast(pwd.pw_uid),
             .gid = @intCast(pwd.pw_gid),
-            .name = "",
-            .home = "",
-            .shell = "",
-            .gecos = "",
+            ._name_len = 0,
+            ._home_len = 0,
+            ._shell_len = 0,
+            ._gecos_len = 0,
         };
 
         // Copy name
         if (pwd.pw_name) |name_ptr| {
-            const name = std.mem.span(name_ptr);
-            const len = @min(name.len, user._name_buf.len - 1);
-            @memcpy(user._name_buf[0..len], name[0..len]);
-            user.name = user._name_buf[0..len];
+            const src = std.mem.span(name_ptr);
+            const len = @min(src.len, user._name_buf.len - 1);
+            @memcpy(user._name_buf[0..len], src[0..len]);
+            user._name_len = len;
         }
 
         // Copy home directory
         if (pwd.pw_dir) |dir_ptr| {
-            const dir = std.mem.span(dir_ptr);
-            const len = @min(dir.len, user._home_buf.len - 1);
-            @memcpy(user._home_buf[0..len], dir[0..len]);
-            user.home = user._home_buf[0..len];
+            const src = std.mem.span(dir_ptr);
+            const len = @min(src.len, user._home_buf.len - 1);
+            @memcpy(user._home_buf[0..len], src[0..len]);
+            user._home_len = len;
         }
 
         // Copy shell
         if (pwd.pw_shell) |shell_ptr| {
-            const shell = std.mem.span(shell_ptr);
-            const len = @min(shell.len, user._shell_buf.len - 1);
-            @memcpy(user._shell_buf[0..len], shell[0..len]);
-            user.shell = user._shell_buf[0..len];
+            const src = std.mem.span(shell_ptr);
+            const len = @min(src.len, user._shell_buf.len - 1);
+            @memcpy(user._shell_buf[0..len], src[0..len]);
+            user._shell_len = len;
         }
 
         // Copy gecos
         if (pwd.pw_gecos) |gecos_ptr| {
-            const gecos = std.mem.span(gecos_ptr);
-            const len = @min(gecos.len, user._gecos_buf.len - 1);
-            @memcpy(user._gecos_buf[0..len], gecos[0..len]);
-            user.gecos = user._gecos_buf[0..len];
+            const src = std.mem.span(gecos_ptr);
+            const len = @min(src.len, user._gecos_buf.len - 1);
+            @memcpy(user._gecos_buf[0..len], src[0..len]);
+            user._gecos_len = len;
         }
 
         return user;
     }
 
     /// Get supplementary groups for this user.
-    pub fn getGroups(self: Self, groups_buf: []GroupId) ![]GroupId {
+    pub fn getGroups(self: *const Self, groups_buf: []GroupId) ![]GroupId {
         var ngroups: c_int = @intCast(groups_buf.len);
-        
+
         // Create null-terminated name
         var name_buf: [256:0]u8 = undefined;
-        if (self.name.len >= name_buf.len) return error.NameTooLong;
-        @memcpy(name_buf[0..self.name.len], self.name);
-        name_buf[self.name.len] = 0;
+        const user_name = self.getName();
+        if (user_name.len >= name_buf.len) return error.NameTooLong;
+        @memcpy(name_buf[0..user_name.len], user_name);
+        name_buf[user_name.len] = 0;
 
         // getgrouplist wants a pointer to c_int array
         var c_groups: [MAX_GROUPS]c.gid_t = undefined;
-        
+
         const result = c.getgrouplist(
             &name_buf,
             @intCast(self.gid),
@@ -164,14 +220,22 @@ pub const User = struct {
 };
 
 /// Group information from group database.
+/// 
+/// This struct stores string data in fixed-size internal buffers.
+/// Use the getter method (getName()) to safely access string data.
 pub const Group = struct {
     gid: GroupId,
-    name: []const u8,
-    
-    // Storage for string data
+
+    // Storage for string data with length
     _name_buf: [256]u8 = undefined,
+    _name_len: usize = 0,
 
     const Self = @This();
+
+    /// Get the group's name. Always returns a valid slice into this struct's buffer.
+    pub fn getName(self: *const Self) []const u8 {
+        return self._name_buf[0..self._name_len];
+    }
 
     /// Get the effective group ID of the current process.
     pub fn effectiveGid() GroupId {
@@ -190,44 +254,65 @@ pub const Group = struct {
         return fromGrp(grp);
     }
 
+    pub fn fromGidInto(gid: GroupId, out: *Self) bool {
+        const grp = c.getgrgid(gid);
+        if (grp == null) return false;
+        out.* = fromGrp(grp);
+        return true;
+    }
+
     /// Look up a group by name from the group database.
-    pub fn fromName(name: []const u8) ?Self {
+    pub fn fromName(lookup_name: []const u8) ?Self {
         // Create null-terminated string
         var name_buf: [256:0]u8 = undefined;
-        if (name.len >= name_buf.len) return null;
-        @memcpy(name_buf[0..name.len], name);
-        name_buf[name.len] = 0;
+        if (lookup_name.len >= name_buf.len) return null;
+        @memcpy(name_buf[0..lookup_name.len], lookup_name);
+        name_buf[lookup_name.len] = 0;
 
         const grp = c.getgrnam(&name_buf);
         if (grp == null) return null;
         return fromGrp(grp);
     }
 
+    pub fn fromNameInto(lookup_name: []const u8, out: *Self) bool {
+        // Create null-terminated string
+        var name_buf: [256:0]u8 = undefined;
+        if (lookup_name.len >= name_buf.len) return false;
+        @memcpy(name_buf[0..lookup_name.len], lookup_name);
+        name_buf[lookup_name.len] = 0;
+
+        const grp = c.getgrnam(&name_buf);
+        if (grp == null) return false;
+        out.* = fromGrp(grp);
+        return true;
+    }
+
     /// Create a Group from a C group struct.
     fn fromGrp(grp: *const c.struct_group) Self {
         var group = Self{
             .gid = @intCast(grp.gr_gid),
-            .name = "",
+            ._name_len = 0,
         };
 
         // Copy name
         if (grp.gr_name) |name_ptr| {
-            const name = std.mem.span(name_ptr);
-            const len = @min(name.len, group._name_buf.len - 1);
-            @memcpy(group._name_buf[0..len], name[0..len]);
-            group.name = group._name_buf[0..len];
+            const src = std.mem.span(name_ptr);
+            const len = @min(src.len, group._name_buf.len - 1);
+            @memcpy(group._name_buf[0..len], src[0..len]);
+            group._name_len = len;
         }
 
         return group;
     }
 
     /// Check if a user is a member of this group.
-    pub fn hasMember(self: Self, username: []const u8) bool {
+    pub fn hasMember(self: *const Self, username: []const u8) bool {
         // Look up group again to get member list
         var name_buf: [256:0]u8 = undefined;
-        if (self.name.len >= name_buf.len) return false;
-        @memcpy(name_buf[0..self.name.len], self.name);
-        name_buf[self.name.len] = 0;
+        const group_name = self.getName();
+        if (group_name.len >= name_buf.len) return false;
+        @memcpy(name_buf[0..group_name.len], group_name);
+        name_buf[group_name.len] = 0;
 
         const grp = c.getgrnam(&name_buf);
         if (grp == null) return false;
@@ -266,14 +351,14 @@ test "User.fromUid root" {
     // Root user should always exist
     if (User.fromUid(0)) |root_user| {
         try std.testing.expectEqual(@as(UserId, 0), root_user.uid);
-        try std.testing.expectEqualStrings("root", root_user.name);
+        try std.testing.expectEqualStrings("root", root_user.getName());
     }
 }
 
 test "User.fromName root" {
     if (User.fromName("root")) |root_user| {
         try std.testing.expectEqual(@as(UserId, 0), root_user.uid);
-        try std.testing.expectEqualStrings("root", root_user.name);
+        try std.testing.expectEqualStrings("root", root_user.getName());
     }
 }
 

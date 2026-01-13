@@ -76,8 +76,9 @@ fn process() !void {
         .remove_timestamp => {
             // Remove timestamp doesn't require root
             const real_uid = system.User.realUid();
-            if (system.User.fromUid(real_uid)) |current_user| {
-                system.removeCredentials(current_user.name, current_user.uid);
+            var current_user: system.User = undefined;
+            if (system.User.fromUidInto(real_uid, &current_user)) {
+                system.removeCredentials(current_user.getName(), current_user.uid);
             }
         },
     }
@@ -99,10 +100,11 @@ fn run(options: cli.RunOptions) !void {
 
     // 1. Get current user info
     const real_uid = system.User.realUid();
-    const current_user = system.User.fromUid(real_uid) orelse {
+    var current_user: system.User = undefined;
+    if (!system.User.fromUidInto(real_uid, &current_user)) {
         log.userError("unknown uid: {d}", .{real_uid});
         return error.UserNotFound;
-    };
+    }
 
     // Get user's groups
     var groups_buf: [system.user.MAX_GROUPS]system.GroupId = undefined;
@@ -149,7 +151,7 @@ fn run(options: cli.RunOptions) !void {
 
     if (!auth.allowed) {
         log.userError("{s} is not allowed to run '{s}' as {s}", .{
-            current_user.name,
+            current_user.getName(),
             command_path,
             options.target_user orelse "root",
         });
@@ -167,10 +169,11 @@ fn run(options: cli.RunOptions) !void {
     }
 
     // 8. Resolve target user/group
-    const target_user = resolveTargetUser(options.target_user) orelse {
+    var target_user: system.User = undefined;
+    if (!resolveTargetUserInto(options.target_user, &target_user)) {
         log.userError("unknown user: {s}", .{options.target_user orelse "root"});
         return error.UserNotFound;
-    };
+    }
 
     const target_gid = if (options.target_group) |g|
         (system.Group.fromName(g) orelse {
@@ -210,12 +213,13 @@ fn runShell(
     hostname: []const u8,
 ) !void {
     // Get target user's shell
-    const target_user = resolveTargetUser(options.target_user) orelse {
+    var target_user: system.User = undefined;
+    if (!resolveTargetUserInto(options.target_user, &target_user)) {
         log.userError("unknown user: {s}", .{options.target_user orelse "root"});
         return error.UserNotFound;
-    };
+    }
 
-    const shell = if (target_user.shell.len > 0) target_user.shell else "/bin/sh";
+    const shell = if (target_user.getShell().len > 0) target_user.getShell() else "/bin/sh";
 
     // Check authorization for shell
     const auth = try checkAuthorization(
@@ -231,7 +235,7 @@ fn runShell(
 
     if (!auth.allowed) {
         log.userError("{s} is not allowed to run a shell as {s}", .{
-            current_user.name,
+            current_user.getName(),
             options.target_user orelse "root",
         });
         return error.NotAllowed;
@@ -264,7 +268,7 @@ fn runShell(
         .arguments = shell_args[0..arg_count],
         .uid = target_user.uid,
         .gid = target_gid,
-        .cwd = if (options.login) target_user.home else options.working_dir,
+        .cwd = if (options.login) target_user.getHome() else options.working_dir,
         .use_pty = true,
         .noexec = false,
     };
@@ -290,7 +294,7 @@ fn checkAuthorization(
     // Parse sudoers file
     const sudoers_path = root.platform.sudoers_path;
 
-    var parsed = sudoers.parse(allocator, sudoers_path) catch |err| {
+    var parsed = sudoers.parseFile(allocator, sudoers_path) catch |err| {
         log.userError("error parsing {s}: {}", .{ sudoers_path, err });
         return error.Configuration;
     };
@@ -300,7 +304,7 @@ fn checkAuthorization(
     var policy = sudoers.Policy.init(allocator, &parsed);
 
     const request = sudoers.AuthRequest{
-        .user = current_user.*,
+        .user = current_user,
         .groups = user_groups,
         .hostname = hostname,
         .command = command,
@@ -315,13 +319,13 @@ fn checkAuthorization(
 fn authenticate(current_user: *const system.User, options: cli.RunOptions, settings: *const defaults.Settings) !void {
     // Check for cached credentials first (unless -k flag is set)
     if (!options.reset_timestamp) {
-        if (system.checkCredentials(current_user.name, current_user.uid, settings.timestamp_timeout)) {
+        if (system.checkCredentials(current_user.getName(), current_user.uid, settings.timestamp_timeout)) {
             log.debug("using cached credentials", .{});
             return;
         }
     } else {
         // Reset timestamp if -k flag is set
-        system.resetCredentials(current_user.name, current_user.uid) catch {};
+        system.resetCredentials(current_user.getName(), current_user.uid) catch {};
     }
 
     // Get TTY name for PAM
@@ -336,7 +340,7 @@ fn authenticate(current_user: *const system.User, options: cli.RunOptions, setti
     const prompt = if (options.prompt) |p|
         p
     else
-        std.fmt.bufPrint(&prompt_buf, "[sudo] password for {s}: ", .{current_user.name}) catch "Password: ";
+        std.fmt.bufPrint(&prompt_buf, "[sudo] password for {s}: ", .{current_user.getName()}) catch "Password: ";
 
     // Attempt authentication with retries
     var attempts: u32 = 0;
@@ -347,8 +351,8 @@ fn authenticate(current_user: *const system.User, options: cli.RunOptions, setti
             // Use PAM authentication
             pam.authenticateUser(.{
                 .service = if (build_options.pam_login and options.login) "sudo-i" else "sudo",
-                .username = current_user.name,
-                .requesting_user = current_user.name,
+                .username = current_user.getName(),
+                .requesting_user = current_user.getName(),
                 .tty = tty_name,
                 .use_stdin = options.stdin,
                 .show_asterisks = settings.pwfeedback,
@@ -373,7 +377,7 @@ fn authenticate(current_user: *const system.User, options: cli.RunOptions, setti
             };
 
             // Authentication succeeded
-            system.updateCredentials(current_user.name, current_user.uid) catch {};
+            system.updateCredentials(current_user.getName(), current_user.uid) catch {};
             return;
         } else {
             // Simple password prompt without PAM (for testing/development)
@@ -384,7 +388,7 @@ fn authenticate(current_user: *const system.User, options: cli.RunOptions, setti
             // Without PAM, we can't actually verify the password
             // This is just for development/testing
             log.debug("PAM not enabled - authentication bypassed", .{});
-            system.updateCredentials(current_user.name, current_user.uid) catch {};
+            system.updateCredentials(current_user.getName(), current_user.uid) catch {};
             return;
         }
     }
@@ -421,9 +425,10 @@ fn resolveCommand(allocator: std.mem.Allocator, command: []const u8) ![]const u8
     return error.CommandNotFound;
 }
 
-fn resolveTargetUser(target: ?[]const u8) ?system.User {
+fn resolveTargetUserInto(target: ?[]const u8, out: *system.User) bool {
     const username = target orelse "root";
-    return system.User.fromName(username);
+    if (!system.User.fromNameInto(username, out)) return false;
+    return true;
 }
 
 fn joinArgs(allocator: std.mem.Allocator, args: []const []const u8) ![]const u8 {
@@ -456,12 +461,12 @@ fn buildEnvironment(
     options: cli.RunOptions,
 ) !void {
     _ = current_user;
-    
+
     // Set basic environment variables
-    try env.put("HOME", target_user.home);
-    try env.put("SHELL", if (target_user.shell.len > 0) target_user.shell else "/bin/sh");
-    try env.put("USER", target_user.name);
-    try env.put("LOGNAME", target_user.name);
+    try env.put("HOME", target_user.getHome());
+    try env.put("SHELL", if (target_user.getShell().len > 0) target_user.getShell() else "/bin/sh");
+    try env.put("USER", target_user.getName());
+    try env.put("LOGNAME", target_user.getName());
 
     // Set PATH (use secure_path if configured, otherwise default)
     const settings = defaults.Settings{};
@@ -503,10 +508,11 @@ fn runEdit(options: cli.EditOptions) !void {
 
     // Get current user info
     const real_uid = system.User.realUid();
-    const current_user = system.User.fromUid(real_uid) orelse {
+    var current_user: system.User = undefined;
+    if (!system.User.fromUidInto(real_uid, &current_user)) {
         log.userError("unknown uid: {d}", .{real_uid});
         return error.UserNotFound;
-    };
+    }
 
     // Get user's groups
     var groups_buf: [system.user.MAX_GROUPS]system.GroupId = undefined;
@@ -519,10 +525,11 @@ fn runEdit(options: cli.EditOptions) !void {
     };
 
     // Resolve target user (default: root)
-    const target_user = resolveTargetUser(options.target_user) orelse {
+    var target_user: system.User = undefined;
+    if (!resolveTargetUserInto(options.target_user, &target_user)) {
         log.userError("unknown user: {s}", .{options.target_user orelse "root"});
         return error.UserNotFound;
-    };
+    }
 
     // Check authorization for sudoedit on each file
     for (options.files) |file| {
@@ -539,7 +546,7 @@ fn runEdit(options: cli.EditOptions) !void {
 
         if (!auth.allowed) {
             log.userError("{s} is not allowed to edit {s} as {s}", .{
-                current_user.name,
+                current_user.getName(),
                 file,
                 options.target_user orelse "root",
             });
@@ -624,7 +631,7 @@ const TempFile = struct {
                 // Create empty temp file for new files
                 const dest = try std.fs.createFileAbsolute(temp_path, .{ .mode = 0o600 });
                 dest.close();
-                
+
                 // Change ownership to invoking user
                 var path_buf: [256:0]u8 = undefined;
                 @memcpy(path_buf[0..temp_path.len], temp_path);
@@ -766,21 +773,23 @@ fn runList(options: cli.ListOptions) !void {
 
     // Get current user info
     const real_uid = system.User.realUid();
-    const current_user = system.User.fromUid(real_uid) orelse {
+    var current_user: system.User = undefined;
+    if (!system.User.fromUidInto(real_uid, &current_user)) {
         log.userError("unknown uid: {d}", .{real_uid});
         return error.UserNotFound;
-    };
+    }
 
     // Determine which user to list privileges for
-    const list_user_name = options.other_user orelse current_user.name;
-    const list_user = system.User.fromName(list_user_name) orelse {
+    const list_user_name = options.other_user orelse current_user.getName();
+    var list_user: system.User = undefined;
+    if (!system.User.fromNameInto(list_user_name, &list_user)) {
         log.userError("unknown user: {s}", .{list_user_name});
         return error.UserNotFound;
-    };
+    }
 
     // Parse sudoers
     const sudoers_path = root.platform.sudoers_path;
-    var parsed = sudoers.parse(allocator, sudoers_path) catch |err| {
+    var parsed = sudoers.parseFile(allocator, sudoers_path) catch |err| {
         log.userError("error parsing {s}: {}", .{ sudoers_path, err });
         return error.Configuration;
     };
@@ -788,7 +797,7 @@ fn runList(options: cli.ListOptions) !void {
 
     // Print user's privileges
     var buf: [256]u8 = undefined;
-    const msg = std.fmt.bufPrint(&buf, "User {s} may run the following commands:\n", .{list_user.name}) catch return;
+    const msg = std.fmt.bufPrint(&buf, "User {s} may run the following commands:\n", .{list_user.getName()}) catch return;
     _ = std.posix.write(std.posix.STDOUT_FILENO, msg) catch {};
 
     // List matching rules (simplified - full implementation would expand aliases)
@@ -820,10 +829,11 @@ fn runList(options: cli.ListOptions) !void {
 fn runValidate() !void {
     // Get current user info
     const real_uid = system.User.realUid();
-    const current_user = system.User.fromUid(real_uid) orelse {
+    var current_user: system.User = undefined;
+    if (!system.User.fromUidInto(real_uid, &current_user)) {
         log.userError("unknown uid: {d}", .{real_uid});
         return error.UserNotFound;
-    };
+    }
 
     const settings = defaults.Settings{};
 
@@ -831,7 +841,7 @@ fn runValidate() !void {
     try authenticate(&current_user, .{}, &settings);
 
     // Update timestamp
-    system.updateCredentials(current_user.name, current_user.uid) catch {};
+    system.updateCredentials(current_user.getName(), current_user.uid) catch {};
 }
 
 fn printHelp() void {

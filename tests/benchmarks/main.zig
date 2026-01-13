@@ -132,10 +132,26 @@ fn benchTokenizeComplex() void {
 var policy_cache: ?lib.sudoers.Policy = null;
 var parsed_cache: ?lib.sudoers.ast.Sudoers = null;
 
+fn createTestUser() lib.system.User {
+    var user = lib.system.User{
+        .uid = 1000,
+        .gid = 1000,
+        ._name_len = 5,
+        ._home_len = 11,
+        ._shell_len = 9,
+        ._gecos_len = 0,
+    };
+    @memcpy(user._name_buf[0..5], "alice");
+    @memcpy(user._home_buf[0..11], "/home/alice");
+    @memcpy(user._shell_buf[0..9], "/bin/bash");
+    return user;
+}
+
 fn benchPolicyCheck() void {
     if (policy_cache) |*policy| {
+        const test_user = createTestUser();
         _ = policy.check(.{
-            .user = .{ .name = "alice", .uid = 1000, .gid = 1000, .home = "/home/alice", .shell = "/bin/bash", .gecos = "" },
+            .user = &test_user,
             .groups = &[_]lib.system.GroupId{1000},
             .hostname = "server1",
             .command = "/usr/bin/apt",

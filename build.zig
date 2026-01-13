@@ -140,6 +140,28 @@ pub fn build(b: *std.Build) void {
     const parser_tests = b.addTest(.{ .root_module = parser_test_module });
     const run_parser_tests = b.addRunArtifact(parser_tests);
 
+    // Sudoers parse API tests (regression test for parse/parseFile misuse)
+    const parse_api_test_module = b.createModule(.{
+        .root_source_file = b.path("tests/unit/sudoers/parse_api_test.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    parse_api_test_module.addImport("sudo-zig-lib", lib_module);
+    parse_api_test_module.link_libc = true;
+    const parse_api_tests = b.addTest(.{ .root_module = parse_api_test_module });
+    const run_parse_api_tests = b.addRunArtifact(parse_api_tests);
+
+    // Edge case tests for memory safety
+    const edge_case_test_module = b.createModule(.{
+        .root_source_file = b.path("tests/unit/sudoers/edge_case_test.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    edge_case_test_module.addImport("sudo-zig-lib", lib_module);
+    edge_case_test_module.link_libc = true;
+    const edge_case_tests = b.addTest(.{ .root_module = edge_case_test_module });
+    const run_edge_case_tests = b.addRunArtifact(edge_case_tests);
+
     // Common string tests
     const string_test_module = b.createModule(.{
         .root_source_file = b.path("tests/unit/common/string_test.zig"),
@@ -384,11 +406,24 @@ pub fn build(b: *std.Build) void {
     const ldap_tests = b.addTest(.{ .root_module = ldap_test_module });
     const run_ldap_tests = b.addRunArtifact(ldap_tests);
 
+    // CLI tests (sudo command-line parsing)
+    const cli_test_module = b.createModule(.{
+        .root_source_file = b.path("tests/unit/sudo/cli_test.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    cli_test_module.addImport("sudo-zig-lib", lib_module);
+    cli_test_module.link_libc = true;
+    const cli_tests = b.addTest(.{ .root_module = cli_test_module });
+    const run_cli_tests = b.addRunArtifact(cli_tests);
+
     // Test step for unit tests
     const test_step = b.step("test", "Run unit tests");
     test_step.dependOn(&run_lib_unit_tests.step);
     test_step.dependOn(&run_tokens_tests.step);
     test_step.dependOn(&run_parser_tests.step);
+    test_step.dependOn(&run_parse_api_tests.step);
+    test_step.dependOn(&run_edge_case_tests.step);
     test_step.dependOn(&run_string_tests.step);
     test_step.dependOn(&run_path_tests.step);
     test_step.dependOn(&run_user_tests.step);
@@ -411,6 +446,82 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_rate_limit_tests.step);
     test_step.dependOn(&run_process_tests.step);
     test_step.dependOn(&run_ldap_tests.step);
+    test_step.dependOn(&run_cli_tests.step);
+
+    // ============================================
+    // Compliance Tests (tests/compliance/)
+    // ============================================
+
+    // Behavior parity tests
+    const behavior_parity_test_module = b.createModule(.{
+        .root_source_file = b.path("tests/compliance/behavior_parity.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    behavior_parity_test_module.addImport("sudo-zig-lib", lib_module);
+    behavior_parity_test_module.link_libc = true;
+    const behavior_parity_tests = b.addTest(.{ .root_module = behavior_parity_test_module });
+    const run_behavior_parity_tests = b.addRunArtifact(behavior_parity_tests);
+
+    // Sudoers syntax compliance tests
+    const sudoers_syntax_test_module = b.createModule(.{
+        .root_source_file = b.path("tests/compliance/sudoers_syntax.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    sudoers_syntax_test_module.addImport("sudo-zig-lib", lib_module);
+    sudoers_syntax_test_module.link_libc = true;
+    const sudoers_syntax_tests = b.addTest(.{ .root_module = sudoers_syntax_test_module });
+    const run_sudoers_syntax_tests = b.addRunArtifact(sudoers_syntax_tests);
+
+    // Compliance test step
+    const compliance_step = b.step("compliance", "Run compliance tests (sudo/sudo-rs parity)");
+    compliance_step.dependOn(&run_behavior_parity_tests.step);
+    compliance_step.dependOn(&run_sudoers_syntax_tests.step);
+
+    // ============================================
+    // Integration Tests (tests/integration/)
+    // ============================================
+
+    const integration_test_module = b.createModule(.{
+        .root_source_file = b.path("tests/integration/main.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    integration_test_module.addImport("sudo-zig-lib", lib_module);
+    integration_test_module.link_libc = true;
+    const integration_tests = b.addTest(.{ .root_module = integration_test_module });
+    const run_integration_tests = b.addRunArtifact(integration_tests);
+
+    const integration_step = b.step("integration", "Run integration tests");
+    integration_step.dependOn(&run_integration_tests.step);
+
+    // ============================================
+    // End-to-End Tests (tests/e2e/)
+    // ============================================
+
+    const e2e_test_module = b.createModule(.{
+        .root_source_file = b.path("tests/e2e/main.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    e2e_test_module.addImport("sudo-zig-lib", lib_module);
+    e2e_test_module.link_libc = true;
+    const e2e_tests = b.addTest(.{ .root_module = e2e_test_module });
+    const run_e2e_tests = b.addRunArtifact(e2e_tests);
+
+    const e2e_step = b.step("e2e", "Run end-to-end tests (may require root)");
+    e2e_step.dependOn(&run_e2e_tests.step);
+
+    // ============================================
+    // All Tests Step
+    // ============================================
+
+    const all_tests_step = b.step("test-all", "Run all tests (unit, compliance, integration, e2e)");
+    all_tests_step.dependOn(test_step);
+    all_tests_step.dependOn(compliance_step);
+    all_tests_step.dependOn(integration_step);
+    all_tests_step.dependOn(e2e_step);
 
     // ============================================
     // Benchmark executable
